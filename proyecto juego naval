@@ -1,0 +1,256 @@
+import random
+import string
+from collections  import deque
+
+TAM_TABLERO = 5
+BARCOS = [
+    ("Destructor", 2),
+    ("Submarino", 3),
+    ("Crucero", 3),
+]
+
+AGUA = "~"
+BARCO = "B"
+IMPACTO = "X"
+FALLO = "o"
+
+
+def crear_tablero(tamano, relleno=AGUA):
+    return [[relleno for _ in range(tamano)] for _ in range(tamano)]
+
+
+def esta_en_rango(fila, col, tamano):
+    return 0 <= fila < tamano and 0 <= col < tamano
+
+
+def imprimir_tableros(tablero_jugador, tablero_disparos):
+    letras = " ".join(string.ascii_uppercase[:TAM_TABLERO])
+    print("\n" + "=" * 55)
+    print("   TU TABLERO (barcos/impactos)        |   TUS DISPAROS (enemigo)")
+    print("   " + letras + "                     |   " + letras)
+
+    for i in range(TAM_TABLERO):
+        fila_izquierda = " ".join(tablero_jugador[i])
+        fila_derecha = " ".join(tablero_disparos[i])
+        print(f"{i+1:2d} {fila_izquierda}                   | {i+1:2d} {fila_derecha}")
+    print("=" * 55 + "\n")
+
+
+def convertir_coordenada(coordenada):
+
+    coordenada = coordenada.strip().upper()
+    if len(coordenada) < 2 or len(coordenada) > 3:
+        return None
+
+    letra_col = coordenada[0]
+    if letra_col not in string.ascii_uppercase[:TAM_TABLERO]:
+        return None
+
+    try:
+        numero_fila = int(coordenada[1:])
+    except ValueError:
+        return None
+
+    if not (1 <= numero_fila <= TAM_TABLERO):
+        return None
+
+    col = ord(letra_col) - ord("A")
+    fila = numero_fila - 1
+    return fila, col
+
+
+def se_puede_colocar_barco(tablero, fila, col, longitud, horizontal):
+    tamano = len(tablero)
+    coordenadas = []
+
+    for i in range(longitud):
+        f = fila
+        c = col
+        if horizontal:
+            c += i
+        else:
+            f += i
+
+        if not esta_en_rango(f, c, tamano):
+            return False, []
+
+        if tablero[f][c] == BARCO:
+            return False, []
+
+        coordenadas.append((f, c))
+
+    return True, coordenadas
+
+
+def colocar_barco(tablero, coordenadas):
+    for fila, col in coordenadas:
+        tablero[fila][col] = BARCO
+
+
+def estan_todos_hundidos(tablero):
+    for fila in tablero:
+        if BARCO in fila:
+            return False
+    return True
+
+
+def colocar_barcos_manual(tablero):
+    print("Vas a colocar tus barcos.")
+    print("Formato de coordenada: A1, B3, H8 ...")
+    print("Orientación: H (horizontal) o V (vertical)\n")
+
+    for nombre, longitud in BARCOS:
+        while True:
+            print(f"Coloca: {nombre} (tamaño {longitud})")
+            inicio = input("  Coordenada inicial (ej: A1): ").strip()
+            orientacion = input("  Orientación (H/V): ").strip().upper()
+
+            pos = convertir_coordenada(inicio)
+            if pos is None or orientacion not in ("H", "V"):
+                print("  ❌ Entrada inválida. Intenta de nuevo.\n")
+                continue
+
+            fila, col = pos
+            es_horizontal = (orientacion == "H")
+            ok, coords = se_puede_colocar_barco(tablero, fila, col, longitud, es_horizontal)
+            if not ok:
+                print("  ❌ No se puede colocar ahí (se sale o choca con otro barco). Intenta de nuevo.\n")
+                continue
+
+            colocar_barco(tablero, coords)
+            print("  ✅ Barco colocado.\n")
+            break
+
+
+def colocar_barcos_aleatorio(tablero):
+    for _, longitud in BARCOS:
+        colocado = False
+        while not colocado:
+            es_horizontal = random.choice([True, False])
+            fila = random.randint(0, TAM_TABLERO - 1)
+            col = random.randint(0, TAM_TABLERO - 1)
+            ok, coords = se_puede_colocar_barco(tablero, fila, col, longitud, es_horizontal)
+            if ok:
+                colocar_barco(tablero, coords)
+                colocado = True
+
+
+def disparar(tablero_objetivo, tablero_seguimiento, fila, col):
+
+    celda = tablero_seguimiento[fila][col]
+    if celda in (IMPACTO, FALLO):
+        return False, True
+
+    if tablero_objetivo[fila][col] == BARCO:
+        tablero_objetivo[fila][col] = IMPACTO
+        tablero_seguimiento[fila][col] = IMPACTO
+        return True, False
+    else:
+        tablero_seguimiento[fila][col] = FALLO
+        return False, False
+
+
+class Bot:
+    def __init__(self, tamano):
+        self.tamano = tamano
+        self.posibles = [(f, c) for f in range(tamano) for c in range(tamano)]
+        random.shuffle(self.posibles)
+        self.cola_caza = deque()
+        self.intentados = set()
+
+    def _agregar_vecinos(self, fila, col):
+        for df, dc in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+            f, c = fila + df, col + dc
+            if esta_en_rango(f, c, self.tamano) and (f, c) not in self.intentados:
+                self.cola_caza.append((f, c))
+
+    def elegir_disparo(self):
+        while self.cola_caza:
+            fc = self.cola_caza.popleft()
+            if fc not in self.intentados:
+                return fc
+
+        while self.posibles:
+            fc = self.posibles.pop()
+            if fc not in self.intentados:
+                return fc
+
+        for f in range(self.tamano):
+            for c in range(self.tamano):
+                if (f, c) not in self.intentados:
+                    return (f, c)
+
+        return (0, 0)
+
+    def registrar_resultado(self, fila, col, impacto):
+        self.intentados.add((fila, col))
+        if impacto:
+            self._agregar_vecinos(fila, col)
+
+
+def juego_principal():
+    print("\n BATALLA NAVAL (MVP) - Jugador vs Bot \n")
+
+    tablero_jugador = crear_tablero(TAM_TABLERO)
+    tablero_bot = crear_tablero(TAM_TABLERO)
+
+    disparos_jugador = crear_tablero(TAM_TABLERO)
+    disparos_bot = crear_tablero(TAM_TABLERO)
+
+    eleccion = input("¿Quieres colocar tus barcos manual (M) o aleatorio (A)? [Manual/Aleatorio]: ").strip().upper()
+    if eleccion == "A":
+        colocar_barcos_aleatorio(tablero_jugador)
+        print("\n✅ Tus barcos fueron colocados aleatoriamente.\n")
+    else:
+        colocar_barcos_manual(tablero_jugador)
+
+    colocar_barcos_aleatorio(tablero_bot)
+
+    ia_bot = Bot(TAM_TABLERO)
+
+    turno = 1
+    while True:
+        print(f"--- TURNO {turno} ---")
+        imprimir_tableros(tablero_jugador, disparos_jugador)
+
+        while True:
+            jugada = input("Tu disparo (ej: A1): ").strip()
+            pos = convertir_coordenada(jugada)
+            if pos is None:
+                print("❌ Coordenada inválida. Ejemplo válido: A1, B3, H8.")
+                continue
+
+            fila, col = pos
+            impacto, repetido = disparar(tablero_bot, disparos_jugador, fila, col)
+            if repetido:
+                print("⚠️ Ya disparaste ahí. Intenta otra casilla.")
+                continue
+
+            if impacto:
+                print("💥 ¡Impacto!")
+            else:
+                print("💧 Fallaste.")
+            break
+
+        if estan_todos_hundidos(tablero_bot):
+            imprimir_tableros(tablero_jugador, disparos_jugador)
+            print("🏆 ¡GANASTE! Hundiste todos los barcos del bot.")
+            break
+
+        fila_bot, col_bot = ia_bot.elegir_disparo()
+        impacto, _ = disparar(tablero_jugador, disparos_bot, fila_bot, col_bot)
+        ia_bot.registrar_resultado(fila_bot, col_bot, impacto)
+
+        letra = chr(ord("A") + col_bot)
+        print(f"🤖 Bot dispara a {letra}{fila_bot+1} -> {'IMPACTO 💥' if impacto else 'FALLO 💧'}")
+
+        if estan_todos_hundidos(tablero_jugador):
+            imprimir_tableros(tablero_jugador, disparos_jugador)
+            print("💀 Perdiste. El bot hundió todos tus barcos.")
+            break
+
+        turno += 1
+
+
+if __name__ == "__main__":
+    juego_principal()
